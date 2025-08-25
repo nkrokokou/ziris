@@ -24,8 +24,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 18
-      - name: Install deps
-        run: npm ci
+      - name: Debug Node env
+        run: |
+          node -v
+          npm -v
+          pwd
+          ls -la
+      - name: Configure npm (disable audit/fund)
+        run: |
+          npm config set fund false
+          npm config set audit false
+      - name: Install deps (with fallback)
+        run: |
+          set -e
+          npm ci --no-audit --no-fund \
+            || npm ci --no-audit --no-fund --legacy-peer-deps \
+            || npm install --no-audit --no-fund --legacy-peer-deps
       - name: Lint
         run: |
           if npm run 2>/dev/null | grep -qE '^\s*lint\s'; then
