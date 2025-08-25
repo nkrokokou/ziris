@@ -20,6 +20,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Detect frontend project
+        id: detect
+        run: |
+          if [ -f package.json ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "No package.json in $(pwd). Skipping frontend npm steps."
+          fi
       - name: Use Node.js 18
         uses: actions/setup-node@v4
         with:
@@ -35,13 +46,16 @@ jobs:
           npm config set fund false
           npm config set audit false
       - name: Inspect npm config and lockfile
+        if: steps.detect.outputs.exists == 'true'
         run: |
           npm config list
           echo "--- lockfile (first 60 lines) ---"
           head -n 60 package-lock.json || true
       - name: Clean npm cache
+        if: steps.detect.outputs.exists == 'true'
         run: npm cache clean --force
       - name: Install deps (verbose with fallbacks)
+        if: steps.detect.outputs.exists == 'true'
         run: |
           set -e
           export CI=true
@@ -51,6 +65,7 @@ jobs:
             || npm install --no-audit --no-fund --legacy-peer-deps --verbose \
             || npm install --no-audit --no-fund --legacy-peer-deps --ignore-scripts --verbose
       - name: Lint
+        if: steps.detect.outputs.exists == 'true'
         run: |
           if npm run 2>/dev/null | grep -qE '^\s*lint\s'; then
             npm run lint || exit 1
@@ -58,6 +73,7 @@ jobs:
             echo "No lint script, skipping"
           fi
       - name: Build
+        if: steps.detect.outputs.exists == 'true'
         run: |
           export CI=false
           npm run build --if-present
