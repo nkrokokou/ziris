@@ -25,7 +25,7 @@ jobs:
         run: npm ci
       - name: Lint
         run: |
-          if npm run | findstr /C:"lint" > /dev/null; then
+          if npm run 2>/dev/null | grep -qE '^\s*lint\s'; then
             npm run lint || exit 1
           else
             echo "No lint script, skipping"
