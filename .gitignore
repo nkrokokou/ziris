@@ -1,0 +1,44 @@
+# ---- General ----
+.DS_Store
+Thumbs.db
+*.log
+logs/
+*.tmp
+*.swp
+
+# ---- Python / Backend ----
+backend/venv/
+**/__pycache__/
+**/*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.env
+.env.*
+
+# ---- Node / Frontend ----
+frontend/zirist/node_modules/
+frontend/zirist/.pnp/
+frontend/zirist/.pnp.js
+frontend/zirist/coverage/
+frontend/zirist/build/
+frontend/zirist/.next/
+frontend/zirist/.cache/
+frontend/zirist/npm-debug.log*
+frontend/zirist/yarn-debug.log*
+frontend/zirist/yarn-error.log*
+frontend/zirist/.env
+frontend/zirist/.env.*
+
+# ---- IDE ----
+.vscode/
+.idea/
+*.iml
+
+# ---- OS / Misc ----
+.Spotlight-V100
+.Trashes
+ehthumbs.db
