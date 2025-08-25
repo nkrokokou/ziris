@@ -34,12 +34,22 @@ jobs:
         run: |
           npm config set fund false
           npm config set audit false
-      - name: Install deps (with fallback)
+      - name: Inspect npm config and lockfile
+        run: |
+          npm config list
+          echo "--- lockfile (first 60 lines) ---"
+          head -n 60 package-lock.json || true
+      - name: Clean npm cache
+        run: npm cache clean --force
+      - name: Install deps (verbose with fallbacks)
         run: |
           set -e
-          npm ci --no-audit --no-fund \
-            || npm ci --no-audit --no-fund --legacy-peer-deps \
-            || npm install --no-audit --no-fund --legacy-peer-deps
+          export CI=true
+          npm config set legacy-peer-deps true
+          npm ci --no-audit --no-fund --verbose \
+            || npm ci --no-audit --no-fund --legacy-peer-deps --verbose \
+            || npm install --no-audit --no-fund --legacy-peer-deps --verbose \
+            || npm install --no-audit --no-fund --legacy-peer-deps --ignore-scripts --verbose
       - name: Lint
         run: |
           if npm run 2>/dev/null | grep -qE '^\s*lint\s'; then
