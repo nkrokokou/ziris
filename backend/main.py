@@ -1,17 +1,16 @@
- 
-
 from fastapi import FastAPI, Depends, HTTPException, status, Header, Path, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Dict, List, Optional, Any
+
 from datetime import datetime, timedelta
 import hmac, hashlib, base64, json, os
 import threading, time, uuid
 import secrets
 
-from .database import SessionLocal, init_db, SensorData, User, Threshold, ThresholdHistory, Suggestion, AuditLog
+from .database import SessionLocal, init_db, SensorData, User, Threshold, ThresholdHistory, Suggestion, AuditLog, SurveyResponse
 
 app = FastAPI(title="Ziris Backend", version="0.1.0")
 
@@ -845,6 +844,146 @@ def get_lstm_metrics(
         tp=tp, fp=fp, tn=tn, fn=fn,
         precision=precision, recall=recall, f1=f1,
     )
+
+
+# ----------------------
+# Surveys (Questionnaires)
+# ----------------------
+
+class SurveySubmission(BaseModel):
+    payload: Dict[str, Any]
+
+
+class SurveyStats(BaseModel):
+    total: int
+    favorable: int
+    by_question_mean: Dict[str, float]
+    by_question_std: Dict[str, float]
+    freq_distribution: Dict[str, int]
+
+
+@app.post("/survey/submit")
+def survey_submit(payload: SurveySubmission, user: User = Depends(require_role("user", "admin")), db: Session = Depends(get_db)):
+    try:
+        rec = SurveyResponse(user_id=user.id, payload=json.dumps(payload.payload, ensure_ascii=False))
+        db.add(rec)
+        db.commit()
+        try:
+            log_action(db, "survey_submit", user_id=user.id, details={})
+        except Exception:
+            pass
+        return {"status": "ok"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Invalid submission: {e}")
+
+
+@app.get("/survey/stats", response_model=SurveyStats)
+def survey_stats(_: User = Depends(require_role("admin")), db: Session = Depends(get_db)):
+    rows = db.query(SurveyResponse).order_by(SurveyResponse.created_at.desc()).all()
+    import math
+    total = len(rows)
+    # Extract numeric ratings
+    numeric_keys = [
+        "global_satisfaction",
+        "ease_of_use",
+        "system_reliability",
+        "response_time",
+        "alert_relevance",
+        "data_quality",
+        "ergonomics_multidevice",
+        "design_presentation",
+        "overall_utility",
+        "clarity_instructions",
+        "incident_resolution_efficiency",
+        "it_communication_quality",
+        "incident_resolution_time",
+        "network_quality",
+    ]
+    values: Dict[str, List[float]] = {k: [] for k in numeric_keys}
+    freq_distribution: Dict[str, int] = {k: 0 for k in ["Quotidien", "Hebdomadaire", "Mensuel", "Rarement", "Jamais", "Sans réponse"]}
+    favorable = 0
+    for r in rows:
+        try:
+            p = json.loads(r.payload)
+        except Exception:
+            continue
+        # frequency
+        freq = str(p.get("tech_issues_frequency", "Sans réponse"))
+        if freq not in freq_distribution:
+            freq = "Sans réponse"
+        freq_distribution[freq] += 1
+        # numeric questions
+        for k in numeric_keys:
+            v = p.get(k)
+            try:
+                v = float(v)
+            except Exception:
+                v = None
+            if v is not None:
+                values[k].append(v)
+        try:
+            gs = float(p.get("global_satisfaction", 0))
+            if gs >= 4:
+                favorable += 1
+        except Exception:
+            pass
+    def mean(lst: List[float]) -> float:
+        return round(sum(lst) / len(lst), 2) if lst else 0.0
+    def std(lst: List[float]) -> float:
+        if not lst:
+            return 0.0
+        m = sum(lst) / len(lst)
+        var = sum((x - m) ** 2 for x in lst) / max(len(lst), 1)
+        return round(math.sqrt(var), 2)
+    by_mean = {k: mean(v) for k, v in values.items()}
+    by_std = {k: std(v) for k, v in values.items()}
+    return SurveyStats(total=total, favorable=favorable, by_question_mean=by_mean, by_question_std=by_std, freq_distribution=freq_distribution)
+
+
+@app.post("/survey/seed")
+def survey_seed(n: int = 20, favorable_count: int = 16, _: User = Depends(require_role("admin")), db: Session = Depends(get_db)):
+    """Seed N survey responses with a desired number of favorable (global_satisfaction >= 4)."""
+    from random import choice, random
+    favorable_count = max(0, min(n, int(favorable_count)))
+    created = 0
+    items = []
+    for i in range(n):
+        favor = (i < favorable_count)
+        base5 = 5 if favor else choice([3, 4])
+        def near(val: int) -> int:
+            # small variation
+            if favor:
+                return max(4, min(5, val))
+            return max(2, min(4, val))
+        payload = {
+            "global_satisfaction": near(base5),
+            "tech_issues_frequency": choice(["Rarement", "Jamais"]) if favor else choice(["Mensuel", "Hebdomadaire"]),
+            "ease_of_use": near(base5),
+            "system_reliability": near(base5),
+            "response_time": near(base5),
+            "alert_relevance": near(5 if favor else 4),
+            "data_quality": near(5 if favor else 4),
+            "ergonomics_multidevice": near(5 if favor else 4),
+            "design_presentation": near(5 if favor else 4),
+            "overall_utility": near(base5),
+            "notifications_wanted": ["Alertes en temps réel", "Recommandations"] if favor else ["Alertes en temps réel"],
+            "clarity_instructions": near(base5),
+            "incident_resolution_efficiency": near(base5),
+            "it_communication_quality": near(base5),
+            "incident_resolution_time": near(base5),
+            "network_quality": near(base5),
+            "comments": None,
+        }
+        rec = SurveyResponse(user_id=None, payload=json.dumps(payload, ensure_ascii=False))
+        db.add(rec)
+        created += 1
+    db.commit()
+    try:
+        log_action(db, "survey_seed", user_id=None, details={"n": created, "favorable": favorable_count})
+    except Exception:
+        pass
+    return {"inserted": created, "favorable": favorable_count}
 
 
 # ----------------------

@@ -32,6 +32,10 @@ Health: `GET http://127.0.0.1:8000/health`
 - `GET /thresholds/suggest` — statistical suggestion
 - `POST /dev/seed?n=<int>&contamination=<float>` — generate N synthetic rows with IsolationForest anomalies (default: `n=50`, `contamination=0.1`)
 - `GET /lstm/metrics?rule=<any|k2|k3|k4>` — classification proxy over recent window; `rule` controls how many metrics must exceed thresholds (default: `any`)
+- Survey (Questionnaire):
+  - `POST /survey/submit` (user/admin) — submit a survey response `{ payload: {...} }`
+  - `GET /survey/stats` (admin) — aggregated stats and distributions
+  - `POST /survey/seed?n=<int>&favorable_count=<int>` (admin) — seed N responses with K favorable
 - Auth: `/auth/login`, `/auth/register`, `/auth/refresh`, `/auth/logout`, `/auth/me`, `/auth/approve/{id}`, `/auth/reset/*`
 
 ## Auth
@@ -42,6 +46,7 @@ Health: `GET http://127.0.0.1:8000/health`
 - SQLAlchemy models in `backend/database.py`.
 - Alembic in `backend/alembic/`.
 - Initialize tables automatically via `init_db()` on startup; use Alembic for schema changes.
+  - New table: `survey_responses` storing `user_id`, `payload` (JSON text), `created_at`.
 
 ## Notes on thresholds and metrics
 - Thresholds set via `POST /thresholds` are persisted in DB and synchronized with in-memory `CURRENT_THRESHOLDS`.

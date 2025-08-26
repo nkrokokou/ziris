@@ -44,3 +44,8 @@ You don’t have to ever use `eject`. The curated feature set is suitable for sm
 You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
 
 To learn React, check out the [React documentation](https://reactjs.org/).
+
+## Ziris App Notes
+
+- Operator questionnaire: navigate to `/operator/survey` to submit responses.
+- Admin survey stats: navigate to `/admin/surveys` to view aggregated charts and seed sample data.

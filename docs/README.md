@@ -23,7 +23,13 @@ Quick links:
    - In `frontend/zirist/`: `npm ci && npm start`
    - Dashboard loads LSTM metrics with rule `k2` (2-of-4) by default: `GET /lstm/metrics?rule=k2`
 
+3. Questionnaire (Survey)
+   - Seed sample responses (admin): `POST /survey/seed?n=20&favorable_count=16`
+   - Operator page: `/operator/survey`
+   - Admin stats page: `/admin/surveys` (charts + seed button)
+
 Notes:
 - Thresholds are persisted in DB and used by `/lstm/metrics` to compute TP/FP/TN/FN.
 - The `contamination` parameter controls the anomaly rate for seeded data (0..1).
+- Survey responses are stored in `survey_responses` and aggregated for admin charts.
 

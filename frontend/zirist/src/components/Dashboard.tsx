@@ -776,7 +776,7 @@ const Dashboard: React.FC = () => {
       y: { beginAtZero: true, title: { display: true, text: 'Valeurs' }, ticks: { color: theme === 'dark' ? '#e0e0e0' : '#333' } },
       x: { ticks: { color: theme === 'dark' ? '#e0e0e0' : '#333' } },
     },
-  }), [theme]);
+  }), [theme, syncHover]);
 
   // Specific options for CM charts
   const cmCountsOptions = useMemo(() => ({
