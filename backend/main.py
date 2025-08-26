@@ -470,6 +470,14 @@ def set_thresholds(payload: Thresholds, user: User = Depends(require_role("admin
     # history
     db.add(ThresholdHistory(temp=temp, press=press, vib=vib, fumee=fumee, changed_at=datetime.utcnow()))
     db.commit()
+    # Keep in-memory thresholds in sync for components that may still reference CURRENT_THRESHOLDS
+    try:
+        CURRENT_THRESHOLDS.temp = temp
+        CURRENT_THRESHOLDS.press = press
+        CURRENT_THRESHOLDS.vib = vib
+        CURRENT_THRESHOLDS.fumee = fumee
+    except Exception:
+        pass
     try:
         log_action(db, "set_thresholds", user_id=user.id, details={"temp": temp, "press": press, "vib": vib, "fumee": fumee})
     except Exception:
@@ -686,8 +694,18 @@ def ingest_sensor_data(payload: List[SensorItem], user: User = Depends(require_r
 
 
 @app.post("/dev/seed")
-def seed_sensor_data(n: int = 50, user: User = Depends(require_role("user", "admin")), db: Session = Depends(get_db)):
-    """Generate and insert N synthetic sensor rows with current timestamps."""
+def seed_sensor_data(
+    n: int = 50,
+    contamination: float = 0.1,
+    user: User = Depends(require_role("user", "admin")),
+    db: Session = Depends(get_db),
+):
+    """Generate and insert N synthetic sensor rows with current timestamps.
+
+    Query params:
+    - n: number of rows to generate
+    - contamination: anomaly rate for IsolationForest (0..1)
+    """
     from datetime import datetime
     try:
         from .data_generator import generate_sensor_data, detect_anomalies
@@ -695,8 +713,17 @@ def seed_sensor_data(n: int = 50, user: User = Depends(require_role("user", "adm
         # If the generator is unavailable, insert nothing
         return {"inserted": 0, "detail": "data_generator not available"}
 
-    data = generate_sensor_data(max(1, int(n)))
-    data = detect_anomalies(data)
+    # sanitize inputs
+    n = max(1, int(n))
+    try:
+        contamination = float(contamination)
+    except Exception:
+        contamination = 0.1
+    contamination = max(0.0, min(1.0, contamination))
+
+    data = generate_sensor_data(n)
+    data = detect_anomalies(data, contamination=contamination)
+
     for d in data:
         row = SensorData(
             timestamp=datetime.utcnow(),
@@ -725,14 +752,31 @@ class LSTMMetrics(BaseModel):
     accuracy: float
     mse: float
     prediction: List[float]
+    # Confusion matrix over recent window
+    tp: int
+    fp: int
+    tn: int
+    fn: int
+    precision: float
+    recall: float
+    f1: float
 
 
 @app.get("/lstm/metrics", response_model=LSTMMetrics)
-def get_lstm_metrics(user: User = Depends(require_role("user", "admin")), db: Session = Depends(get_db)):
+def get_lstm_metrics(
+    user: User = Depends(require_role("user", "admin")),
+    db: Session = Depends(get_db),
+    rule: str = "any",  # any | k2 | k3 | k4
+):
 
-    rows = db.query(SensorData).order_by(SensorData.timestamp.desc()).limit(100).all()
+    rows = db.query(SensorData).order_by(SensorData.timestamp.desc()).limit(300).all()
     if not rows:
-        return LSTMMetrics(accuracy=0.9, mse=0.05, prediction=[0, 0, 0, 0])
+        return LSTMMetrics(
+            accuracy=0.9,
+            mse=0.05,
+            prediction=[0, 0, 0, 0],
+            tp=0, fp=0, tn=0, fn=0, precision=0.0, recall=0.0, f1=0.0,
+        )
 
     n = len(rows)
     avg_temp = sum(float(r.temperature or 0) for r in rows) / n
@@ -749,7 +793,58 @@ def get_lstm_metrics(user: User = Depends(require_role("user", "admin")), db: Se
     ) / max(n, 1)
     mse = min(var / 1000.0, 10.0)
     accuracy = max(0.5, 1.0 - mse / 10.0)
-    return LSTMMetrics(accuracy=accuracy, mse=mse, prediction=[avg_temp, avg_press, avg_vib, avg_fumee])
+
+    # Confusion matrix approximation: predicted anomaly if any metric exceeds current thresholds
+    # Load thresholds from DB (fall back to in-memory defaults if missing)
+    thr_row = db.query(Threshold).order_by(Threshold.id.asc()).first()
+    thr = Thresholds(
+        temp=(thr_row.temp if thr_row else CURRENT_THRESHOLDS.temp),
+        press=(thr_row.press if thr_row else CURRENT_THRESHOLDS.press),
+        vib=(thr_row.vib if thr_row else CURRENT_THRESHOLDS.vib),
+        fumee=(thr_row.fumee if thr_row else CURRENT_THRESHOLDS.fumee),
+    )
+    tp = fp = tn = fn = 0
+    # map rule to k-of-4 threshold
+    k_req = 1
+    r = (rule or "any").lower()
+    if r == "k2":
+        k_req = 2
+    elif r == "k3":
+        k_req = 3
+    elif r == "k4":
+        k_req = 4
+    for r in rows:
+        c = 0
+        if float(r.temperature or 0.0) > float(thr.temp):
+            c += 1
+        if float(r.pression or 0.0) > float(thr.press):
+            c += 1
+        if float(r.vibration or 0.0) > float(thr.vib):
+            c += 1
+        if float(r.fumee or 0.0) > float(thr.fumee):
+            c += 1
+        pred = (c >= k_req)
+        truth = bool(r.anomaly)
+        if pred and truth:
+            tp += 1
+        elif pred and not truth:
+            fp += 1
+        elif not pred and not truth:
+            tn += 1
+        else:
+            fn += 1
+
+    precision = (tp / (tp + fp)) if (tp + fp) > 0 else 0.0
+    recall = (tp / (tp + fn)) if (tp + fn) > 0 else 0.0
+    f1 = ((2 * precision * recall) / (precision + recall)) if (precision + recall) > 0 else 0.0
+
+    return LSTMMetrics(
+        accuracy=accuracy,
+        mse=mse,
+        prediction=[avg_temp, avg_press, avg_vib, avg_fumee],
+        tp=tp, fp=fp, tn=tn, fn=fn,
+        precision=precision, recall=recall, f1=f1,
+    )
 
 
 # ----------------------

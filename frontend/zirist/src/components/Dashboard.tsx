@@ -5,6 +5,7 @@ import { Bar, Line } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend } from 'chart.js';
 import { debounce } from 'lodash';
 import { DashboardData } from '../types/DashboardData';
+import { LSTMMetrics } from '../types/LSTMMetrics';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import zoomPlugin from 'chartjs-plugin-zoom';
@@ -61,6 +62,7 @@ const HelpContent: React.FC<{ variant: 'compact' | 'full' }> = ({ variant }) => 
           <h6>Générer des données (dev)</h6>
           <ul>
             <li>Le bouton « Seeder données (100) » appelle l’API /dev/seed pour insérer 100 points récents.</li>
+            <li>Paramètre avancé (API): <code>contamination</code> pour contrôler le taux d'anomalies (ex: <code>/dev/seed?n=800&contamination=0.35</code>).</li>
             <li>Après génération, un rafraîchissement automatique est lancé.</li>
           </ul>
         </div>
@@ -74,7 +76,7 @@ const HelpContent: React.FC<{ variant: 'compact' | 'full' }> = ({ variant }) => 
         <div className="mb-3">
           <h6>Seuils critiques</h6>
           <ul>
-            <li>Modifiez Temp/Press/Vib/Fumée pour personnaliser les alertes.</li>
+            <li>Modifiez Temp/Press/Vib/Fumée pour personnaliser les alertes (persisté en base, utilisé par les métriques).</li>
             <li>« Générer seuil critique » propose des seuils, « Appliquer toutes les suggestions » les applique en masse.</li>
           </ul>
         </div>
@@ -82,6 +84,8 @@ const HelpContent: React.FC<{ variant: 'compact' | 'full' }> = ({ variant }) => 
           <h6>Modèle LSTM</h6>
           <ul>
             <li>« Retrain LSTM » démarre l’apprentissage (statut dans notifications).</li>
+            <li>Les scores (TP/FP/TN/FN) utilisent par défaut la règle « 2 sur 4 » (k2): positif si ≥2 métriques dépassent leur seuil.</li>
+            <li>API: <code>/lstm/metrics?rule=any|k2|k3|k4</code> permet d’ajuster la règle (le tableau utilise k2).</li>
           </ul>
         </div>
         <div className="mb-3">
@@ -170,7 +174,7 @@ const Dashboard: React.FC = () => {
   const [selectedZone, setSelectedZone] = useState('all');
   const [sensorType, setSensorType] = useState('all');
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
-  const [lstmMetrics, setLstmMetrics] = useState<{ accuracy: number; mse: number; prediction: number[] } | null>(null);
+  const [lstmMetrics, setLstmMetrics] = useState<LSTMMetrics | null>(null);
   const [thresholds, setThresholds] = useState({ temp: 80, press: 8, vib: 15, fumee: 200 });
   // UI controls
   const [showHelpOffcanvas, setShowHelpOffcanvas] = useState(false);
@@ -266,7 +270,7 @@ const Dashboard: React.FC = () => {
       const [dashboardResponse, recResponse, lstmResponse] = await Promise.all([
         api.get('/dashboard/data'),
         api.get('/sensor/recommendations'),
-        api.get('/lstm/metrics'),
+        api.get('/lstm/metrics?rule=k2'),
       ]);
       console.log('Dashboard data:', dashboardResponse.data);
       setDashboardData(dashboardResponse.data);
@@ -450,7 +454,7 @@ const Dashboard: React.FC = () => {
       const [dashboardResponse, recResponse, lstmResponse] = await Promise.all([
         api.get('/dashboard/data'),
         api.get('/sensor/recommendations'),
-        api.get('/lstm/metrics'),
+        api.get('/lstm/metrics?rule=k2'),
       ]);
       setDashboardData(dashboardResponse.data);
       setRecommendations(recResponse.data);
@@ -544,6 +548,8 @@ const Dashboard: React.FC = () => {
       { id: 'chart-sensor', title: 'Prédictions par Capteur (LSTM)' },
       { id: 'chart-zone', title: 'Anomalies par Zone' },
       { id: 'chart-realtime', title: 'Suivi en Temps Réel' },
+      { id: 'chart-cm-counts', title: 'Matrice de Confusion (TP/FP/TN/FN)' },
+      { id: 'chart-cm-scores', title: 'Scores de Classification (Precision/Recall/F1)' },
     ];
     let sectionIndex = 1;
     for (const { id, title } of chartElements) {
@@ -673,6 +679,119 @@ const Dashboard: React.FC = () => {
       },
     ],
   }), [dashboardData]);
+
+  // Confusion matrix counts chart data (TP/FP/TN/FN)
+  const cmCountsData = useMemo(() => ({
+    labels: ['TP', 'FP', 'TN', 'FN'],
+    datasets: [
+      {
+        label: 'Counts',
+        data: lstmMetrics ? [lstmMetrics.tp, lstmMetrics.fp, lstmMetrics.tn, lstmMetrics.fn] : [0, 0, 0, 0],
+        backgroundColor: ['#2ecc71', '#e74c3c', '#3498db', '#f1c40f'],
+        borderColor: ['#27ae60', '#c0392b', '#2980b9', '#f39c12'],
+        borderWidth: 1,
+      },
+    ],
+  }), [lstmMetrics]);
+
+  // Precision/Recall/F1 bar chart data (robust parsing + percentages)
+  const cmScoresData = useMemo(() => {
+    const toNum = (v: any) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const perc = (v: any) => Math.max(0, Math.min(100, toNum(v) * 100));
+    return {
+      labels: ['Precision', 'Recall', 'F1'],
+      datasets: [
+        {
+          label: 'Scores (%)',
+          data: lstmMetrics ? [perc(lstmMetrics.precision), perc(lstmMetrics.recall), perc(lstmMetrics.f1)] : [0, 0, 0],
+          backgroundColor: ['#8e44ad', '#16a085', '#e67e22'],
+          borderColor: ['#7d3c98', '#13866b', '#d35400'],
+          borderWidth: 1,
+        },
+      ],
+    };
+  }, [lstmMetrics]);
+
+  // Base options for charts, memoized to provide a stable reference
+  const baseOptions = useMemo(() => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { position: 'top' as const, labels: { color: theme === 'dark' ? '#e0e0e0' : '#333' } },
+      title: { display: true, text: 'Vue d\'ensemble', color: theme === 'dark' ? '#e0e0e0' : '#333' },
+      tooltip: {
+        mode: 'index' as const,
+        intersect: false,
+        callbacks: {
+          title: (items: any) => items?.[0]?.label || '',
+          label: (ctx: any) => {
+            const dsLabel = ctx.dataset?.label || '';
+            const val = ctx.parsed?.y ?? ctx.parsed;
+            let unit = '';
+            if (/Temp/.test(dsLabel)) unit = '°C';
+            else if (/Pression/.test(dsLabel)) unit = 'bars';
+            else if (/Vibration/.test(dsLabel)) unit = 'mm/s';
+            else if (/Fumée/.test(dsLabel)) unit = 'ppm';
+            // Delta vs previous point (for time-series only and non-threshold datasets)
+            let deltaStr = '';
+            const isThreshold = /Seuil/.test(dsLabel);
+            if (!isThreshold && Array.isArray(ctx.dataset?.data) && typeof ctx.dataIndex === 'number' && ctx.dataIndex > 0) {
+              const prev = ctx.dataset.data[ctx.dataIndex - 1];
+              if (typeof prev === 'number') {
+                const d = (val as number) - prev;
+                if (!Number.isNaN(d) && Number.isFinite(d)) {
+                  const sign = d > 0 ? '+' : '';
+                  deltaStr = ` (Δ ${sign}${d.toFixed(2)})`;
+                }
+              }
+            }
+            return `${dsLabel}: ${val}${unit ? ' ' + unit : ''}${deltaStr}`;
+          },
+        },
+      },
+      zoom: {
+        pan: { enabled: true, mode: 'x' as const, modifierKey: 'shift' as const },
+        zoom: {
+          wheel: { enabled: true, modifierKey: 'ctrl' as const },
+          pinch: { enabled: true },
+          drag: { enabled: true },
+          mode: 'x' as const,
+          limits: { x: { min: 0 }, y: { min: 'original' as const } },
+        },
+      },
+      decimation: {
+        enabled: true,
+        algorithm: 'lttb' as const,
+        samples: 50,
+      },
+    },
+    onHover: (event: any, elements: any[], chart: any) => {
+      const idx = elements?.[0]?.index ?? null;
+      syncHover(idx, chart);
+    },
+    scales: {
+      y: { beginAtZero: true, title: { display: true, text: 'Valeurs' }, ticks: { color: theme === 'dark' ? '#e0e0e0' : '#333' } },
+      x: { ticks: { color: theme === 'dark' ? '#e0e0e0' : '#333' } },
+    },
+  }), [theme]);
+
+  // Specific options for CM charts
+  const cmCountsOptions = useMemo(() => ({
+    ...baseOptions,
+    plugins: { ...baseOptions.plugins, title: { display: true, text: 'Matrice de confusion - Comptes', color: theme === 'dark' ? '#e0e0e0' : '#333' } },
+  }), [baseOptions, theme]);
+
+  const cmScoresOptions = useMemo(() => ({
+    ...baseOptions,
+    plugins: { ...baseOptions.plugins, title: { display: true, text: 'Scores de classification (%)', color: theme === 'dark' ? '#e0e0e0' : '#333' } },
+    scales: {
+      ...baseOptions.scales,
+      y: { ...baseOptions.scales.y, beginAtZero: true, max: 100, ticks: { ...baseOptions.scales.y.ticks, callback: (v: any) => `${v}%` } },
+    },
+  }), [baseOptions, theme]);
 
   const realTimeChartData = useMemo(() => ({
     labels: realTimeData.timestamps,
@@ -806,68 +925,6 @@ const Dashboard: React.FC = () => {
     ],
   }), [realTimeData, thresholds]);
 
-  const options = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { position: 'top' as const, labels: { color: theme === 'dark' ? '#e0e0e0' : '#333' } },
-      title: { display: true, text: 'Vue d\'ensemble', color: theme === 'dark' ? '#e0e0e0' : '#333' },
-      tooltip: {
-        mode: 'index' as const,
-        intersect: false,
-        callbacks: {
-          title: (items: any) => items?.[0]?.label || '',
-          label: (ctx: any) => {
-            const dsLabel = ctx.dataset?.label || '';
-            const val = ctx.parsed?.y ?? ctx.parsed;
-            let unit = '';
-            if (/Temp/.test(dsLabel)) unit = '°C';
-            else if (/Pression/.test(dsLabel)) unit = 'bars';
-            else if (/Vibration/.test(dsLabel)) unit = 'mm/s';
-            else if (/Fumée/.test(dsLabel)) unit = 'ppm';
-            // Delta vs previous point (for time-series only and non-threshold datasets)
-            let deltaStr = '';
-            const isThreshold = /Seuil/.test(dsLabel);
-            if (!isThreshold && Array.isArray(ctx.dataset?.data) && typeof ctx.dataIndex === 'number' && ctx.dataIndex > 0) {
-              const prev = ctx.dataset.data[ctx.dataIndex - 1];
-              if (typeof prev === 'number') {
-                const d = (val as number) - prev;
-                if (!Number.isNaN(d) && Number.isFinite(d)) {
-                  const sign = d > 0 ? '+' : '';
-                  deltaStr = ` (Δ ${sign}${d.toFixed(2)})`;
-                }
-              }
-            }
-            return `${dsLabel}: ${val}${unit ? ' ' + unit : ''}${deltaStr}`;
-          },
-        },
-      },
-      zoom: {
-        pan: { enabled: true, mode: 'x' as const, modifierKey: 'shift' as const },
-        zoom: {
-          wheel: { enabled: true, modifierKey: 'ctrl' as const },
-          pinch: { enabled: true },
-          drag: { enabled: true },
-          mode: 'x' as const,
-          limits: { x: { min: 0 }, y: { min: 'original' as const } },
-        },
-      },
-      decimation: {
-        enabled: true,
-        algorithm: 'lttb' as const,
-        samples: 50,
-      },
-    },
-    onHover: (event: any, elements: any[], chart: any) => {
-      const idx = elements?.[0]?.index ?? null;
-      syncHover(idx, chart);
-    },
-    scales: {
-      y: { beginAtZero: true, title: { display: true, text: 'Valeurs' }, ticks: { color: theme === 'dark' ? '#e0e0e0' : '#333' } },
-      x: { ticks: { color: theme === 'dark' ? '#e0e0e0' : '#333' } },
-    },
-  };
-
   const realTimeOptions = {
     responsive: true,
     maintainAspectRatio: false,
@@ -976,6 +1033,55 @@ const Dashboard: React.FC = () => {
           </Button>
         </Col>
       </Row>
+      {/* Confusion Matrix and Scores */}
+      <Row className="mt-4">
+        <Col md={6}>
+          <Card className="shadow-sm p-3 bg-white rounded neon-card">
+            <Card.Title className="d-flex justify-content-between align-items-center">
+              <span>Matrice de confusion (TP/FP/TN/FN)</span>
+            </Card.Title>
+            <div className="table-responsive mb-2">
+              <Table size="sm" bordered className="mb-0">
+                <thead>
+                  <tr>
+                    <th>TP</th>
+                    <th>FP</th>
+                    <th>TN</th>
+                    <th>FN</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>{lstmMetrics?.tp ?? 0}</td>
+                    <td>{lstmMetrics?.fp ?? 0}</td>
+                    <td>{lstmMetrics?.tn ?? 0}</td>
+                    <td>{lstmMetrics?.fn ?? 0}</td>
+                  </tr>
+                </tbody>
+              </Table>
+            </div>
+            <div className={`chart-container ${showEffects ? 'chart-glow' : ''}`} style={{ height: '220px' }} id="chart-cm-counts">
+              <Bar data={cmCountsData} options={cmCountsOptions} />
+            </div>
+          </Card>
+        </Col>
+        <Col md={6}>
+          <Card className="shadow-sm p-3 bg-white rounded neon-card">
+            <Card.Title className="d-flex justify-content-between align-items-center">
+              <span>Scores de classification (Precision / Recall / F1)</span>
+              <div className="d-flex gap-2">
+                <Badge bg="success">Précision: {lstmMetrics ? (Number(lstmMetrics.precision) * 100).toFixed(1) : '0.0'}%</Badge>
+                <Badge bg="info">Rappel: {lstmMetrics ? (Number(lstmMetrics.recall) * 100).toFixed(1) : '0.0'}%</Badge>
+                <Badge bg="warning" text="dark">F1: {lstmMetrics ? (Number(lstmMetrics.f1) * 100).toFixed(1) : '0.0'}%</Badge>
+              </div>
+            </Card.Title>
+            <div className={`chart-container ${showEffects ? 'chart-glow' : ''}`} style={{ height: '220px' }} id="chart-cm-scores">
+              <Bar data={cmScoresData} options={cmScoresOptions} />
+            </div>
+          </Card>
+        </Col>
+      </Row>
+      
 
       {/* Aide Offcanvas (compact) */}
       <Offcanvas placement="end" show={showHelpOffcanvas} onHide={() => setShowHelpOffcanvas(false)}>
@@ -1076,7 +1182,7 @@ const Dashboard: React.FC = () => {
         </Col>
         <Col md={5}>
           <div className={`chart-container shadow-sm p-3 bg-white rounded neon-card ${showEffects ? 'chart-glow' : ''}`} style={{ height: '200px' }} id="chart-overview" role="img" aria-label="Graphique aperçu: zoom pincement, molette+Ctrl pour zoom, Shift pour déplacer" onDoubleClick={() => overviewChartRef.current?.resetZoom?.()}>
-            <Bar ref={overviewChartRef} data={chartData} options={options} />
+            <Bar ref={overviewChartRef} data={chartData} options={baseOptions} />
           </div>
           <Button size="sm" className="mt-2 neon-btn" onClick={() => overviewChartRef.current?.resetZoom?.()}>
             Réinitialiser le zoom
@@ -1106,7 +1212,7 @@ const Dashboard: React.FC = () => {
           <Card className="shadow-sm p-3 bg-white rounded neon-card">
             <Card.Title>Prédictions par capteur (Mesure en temps réel)</Card.Title>
             <div className={`chart-container ${showEffects ? 'chart-glow' : ''}`} style={{ height: '200px' }} id="chart-sensor" role="img" aria-label="Graphique capteur: zoom pincement, molette+Ctrl pour zoom, Shift pour déplacer" onDoubleClick={() => sensorChartRef.current?.resetZoom?.()}>
-              <Line ref={sensorChartRef} data={sensorChartData} options={options} />
+              <Line ref={sensorChartRef} data={sensorChartData} options={baseOptions} />
             </div>
             <Button size="sm" className="mt-2 neon-btn" onClick={() => sensorChartRef.current?.resetZoom?.()}>Reset zoom</Button>
             <div className="form-text mt-1">Astuce: pincement pour zoomer, molette+Ctrl pour zoom</div>
@@ -1116,7 +1222,7 @@ const Dashboard: React.FC = () => {
           <Card className="shadow-sm p-3 bg-white rounded neon-card">
             <Card.Title>Graphique par zone (Mesure en temps réel)</Card.Title>
             <div className={`chart-container ${showEffects ? 'chart-glow' : ''}`} style={{ height: '200px' }} id="chart-zone" role="img" aria-label="Graphique zone: zoom pincement, molette+Ctrl pour zoom, Shift pour déplacer" onDoubleClick={() => zoneChartRef.current?.resetZoom?.()}>
-              <Bar ref={zoneChartRef} data={zoneChartData} options={options} />
+              <Bar ref={zoneChartRef} data={zoneChartData} options={baseOptions} />
             </div>
             <Button size="sm" className="mt-2 neon-btn" onClick={() => zoneChartRef.current?.resetZoom?.()}>Reset zoom</Button>
             <div className="form-text mt-1">Astuce: double-clic pour réinitialiser le zoom</div>

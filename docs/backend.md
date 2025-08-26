@@ -30,6 +30,8 @@ Health: `GET http://127.0.0.1:8000/health`
 - `GET /sensor/recommendations` — suggested actions based on thresholds
 - `GET /thresholds` / `POST /thresholds` — get/set thresholds (admin for POST)
 - `GET /thresholds/suggest` — statistical suggestion
+- `POST /dev/seed?n=<int>&contamination=<float>` — generate N synthetic rows with IsolationForest anomalies (default: `n=50`, `contamination=0.1`)
+- `GET /lstm/metrics?rule=<any|k2|k3|k4>` — classification proxy over recent window; `rule` controls how many metrics must exceed thresholds (default: `any`)
 - Auth: `/auth/login`, `/auth/register`, `/auth/refresh`, `/auth/logout`, `/auth/me`, `/auth/approve/{id}`, `/auth/reset/*`
 
 ## Auth
@@ -40,6 +42,10 @@ Health: `GET http://127.0.0.1:8000/health`
 - SQLAlchemy models in `backend/database.py`.
 - Alembic in `backend/alembic/`.
 - Initialize tables automatically via `init_db()` on startup; use Alembic for schema changes.
+
+## Notes on thresholds and metrics
+- Thresholds set via `POST /thresholds` are persisted in DB and synchronized with in-memory `CURRENT_THRESHOLDS`.
+- `/lstm/metrics` computes confusion matrix using the persisted thresholds; accuracy is a placeholder metric from variability.
 
 ## Tests
 - Place tests in `backend/tests/`.
