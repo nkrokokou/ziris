@@ -13,6 +13,8 @@ import AdminUsers from './components/AdminUsers';
 import AdminSuggestions from './components/AdminSuggestions';
 import AdminAudit from './components/AdminAudit';
 import AdminJobs from './components/AdminJobs';
+const OperatorSurveyLazy = React.lazy(() => import('./components/OperatorSurvey'));
+const AdminSurveyStatsLazy = React.lazy(() => import('./components/AdminSurveyStats'));
 const AdminThresholdsLazy = React.lazy(() => import('./components/AdminThresholds'));
 const AdminModelOpsLazy = React.lazy(() => import('./components/AdminModelOps'));
 const OperatorSuggestionLazy = React.lazy(() => import('./components/OperatorSuggestion'));
@@ -47,7 +49,10 @@ const App: React.FC = () => {
               <NavLink to="/isolation-forest" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>Isolation Forest</NavLink>
             )}
             {isAuthenticated && (
-              <NavLink to="/operator/suggest" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>Suggestion</NavLink>
+              <>
+                <NavLink to="/operator/suggest" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>Suggestion</NavLink>
+                <NavLink to="/operator/survey" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>Questionnaire</NavLink>
+              </>
             )}
             {isAuthenticated && isAdmin && (
               <NavDropdown title="Admin" id="admin-nav-dropdown" menuVariant={theme === 'dark' ? 'dark' : undefined}>
@@ -59,6 +64,7 @@ const App: React.FC = () => {
                 <NavDropdown.Item as={NavLink} to="/admin/audit">Audit</NavDropdown.Item>
                 <NavDropdown.Divider />
                 <NavDropdown.Item as={NavLink} to="/admin/notifications">Notifications</NavDropdown.Item>
+                <NavDropdown.Item as={NavLink} to="/admin/surveys">Questionnaire - Stats</NavDropdown.Item>
               </NavDropdown>
             )}
           </Nav>
@@ -103,6 +109,7 @@ const App: React.FC = () => {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/isolation-forest" element={<IsolationForest />} />
           <Route path="/operator/suggest" element={<React.Suspense fallback={null}><OperatorSuggestionLazy /></React.Suspense>} />
+          <Route path="/operator/survey" element={<React.Suspense fallback={null}><OperatorSurveyLazy /></React.Suspense>} />
         </Route>
         <Route element={<AdminRoute />}>
           <Route path="/admin/users" element={<AdminUsers />} />
@@ -112,6 +119,7 @@ const App: React.FC = () => {
           <Route path="/admin/jobs" element={<AdminJobs />} />
           <Route path="/admin/audit" element={<AdminAudit />} />
           <Route path="/admin/notifications" element={<React.Suspense fallback={null}><AdminNotificationsLazy /></React.Suspense>} />
+          <Route path="/admin/surveys" element={<React.Suspense fallback={null}><AdminSurveyStatsLazy /></React.Suspense>} />
         </Route>
       </Routes>
     </div>

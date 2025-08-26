@@ -43,15 +43,6 @@ class Threshold(Base):
     fumee = Column(Float, default=200.0)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
-
-class AuditLog(Base):
-    __tablename__ = "audit_logs"
-    id = Column(Integer, primary_key=True, index=True)
-    ts = Column(DateTime, default=datetime.utcnow, index=True)
-    user_id = Column(Integer, nullable=True, index=True)
-    action = Column(String, index=True)  # e.g., login, register, approve_user, set_thresholds, create_suggestion, update_suggestion, retrain, seed, ingest
-    details = Column(Text, nullable=True)
-
 class ThresholdHistory(Base):
     __tablename__ = "thresholds_history"
     id = Column(Integer, primary_key=True, index=True)
@@ -61,6 +52,13 @@ class ThresholdHistory(Base):
     fumee = Column(Float)
     changed_at = Column(DateTime, default=datetime.utcnow)
 
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    ts = Column(DateTime, default=datetime.utcnow, index=True)
+    user_id = Column(Integer, nullable=True, index=True)
+    action = Column(String, index=True)  # e.g., login, register, approve_user, set_thresholds, create_suggestion, update_suggestion, retrain, seed, ingest
+    details = Column(Text, nullable=True)
 
 class Suggestion(Base):
     __tablename__ = "suggestions"
@@ -79,8 +77,15 @@ class Suggestion(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
+class SurveyResponse(Base):
+    __tablename__ = "survey_responses"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True, nullable=True)
+    payload = Column(Text, nullable=False)  # JSON blob of answers
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
 def init_db():
     # Keep metadata creation for brand new DBs; prefer Alembic migrations for schema changes
     Base.metadata.create_all(bind=engine)
 
-__all__ = ['engine', 'SessionLocal', 'Base', 'init_db', 'User', 'SensorData', 'Threshold', 'ThresholdHistory', 'Suggestion', 'AuditLog']
+__all__ = ['engine', 'SessionLocal', 'Base', 'init_db', 'User', 'SensorData', 'Threshold', 'ThresholdHistory', 'Suggestion', 'AuditLog', 'SurveyResponse']
