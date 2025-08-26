@@ -548,8 +548,8 @@ const Dashboard: React.FC = () => {
       { id: 'chart-sensor', title: 'Prédictions par Capteur (LSTM)' },
       { id: 'chart-zone', title: 'Anomalies par Zone' },
       { id: 'chart-realtime', title: 'Suivi en Temps Réel' },
-      { id: 'chart-cm-counts', title: 'Matrice de Confusion (TP/FP/TN/FN)' },
-      { id: 'chart-cm-scores', title: 'Scores de Classification (Precision/Recall/F1)' },
+      { id: 'chart-cm-counts', title: 'Matrice de Confusion' },
+      { id: 'chart-cm-scores', title: 'Scores de Classification' },
     ];
     let sectionIndex = 1;
     for (const { id, title } of chartElements) {
@@ -1038,7 +1038,7 @@ const Dashboard: React.FC = () => {
         <Col md={6}>
           <Card className="shadow-sm p-3 bg-white rounded neon-card">
             <Card.Title className="d-flex justify-content-between align-items-center">
-              <span>Matrice de confusion (TP/FP/TN/FN)</span>
+              <span>Matrice de confusion</span>
             </Card.Title>
             <div className="table-responsive mb-2">
               <Table size="sm" bordered className="mb-0">
@@ -1068,7 +1068,7 @@ const Dashboard: React.FC = () => {
         <Col md={6}>
           <Card className="shadow-sm p-3 bg-white rounded neon-card">
             <Card.Title className="d-flex justify-content-between align-items-center">
-              <span>Scores de classification (Precision / Recall / F1)</span>
+              <span>Scores de classification</span>
               <div className="d-flex gap-2">
                 <Badge bg="success">Précision: {lstmMetrics ? (Number(lstmMetrics.precision) * 100).toFixed(1) : '0.0'}%</Badge>
                 <Badge bg="info">Rappel: {lstmMetrics ? (Number(lstmMetrics.recall) * 100).toFixed(1) : '0.0'}%</Badge>
